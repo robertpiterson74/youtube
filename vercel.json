@@ -1,9 +1,5 @@
 {
-  "redirects": [
-    {
-      "source": "/",
-      "destination": "/api/redirect",
-      "permanent": false
-    }
+  "routes": [
+    { "src": "/api/redirect(?:/)?", "dest": "/api/redirect.js" }
   ]
 }
